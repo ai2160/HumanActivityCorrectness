@@ -5,18 +5,115 @@ date: "August 15, 2015"
 output: html_document
 ---
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r}
-summary(cars)
+```{r global_opts, include = FALSE}
+knitr::opts_chunk$set(fig.path='/Figs', cache=TRUE, echo=TRUE, warning=FALSE)
 ```
 
-You can also embed plots, for example:
+#Abstract
 
-```{r, echo=FALSE}
-plot(cars)
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website [here][0]
+
+```{r init}
+library(caret)
+library(rattle)
+library(doParallel)
+registerDoParallel(cores = 6)
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+#Getting and Cleaning Data
+Data is prepartitioned into two sets. One to be used for training and crossvalidation as necessary and there is also a validation set to validate the accuracy
+
+```{r get_data1}
+if(!file.exists('pml-training.csv'))
+  download.file('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv')
+if(!file.exists('pml-testing.csv'))
+  download.file('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv')
+Data <- read.csv('pml-training.csv')
+validateData <- read.csv('pml-testing.csv')
+```
+
+Before any exploratory analysis, data is immediately partitioned into training and test
+
+```{r get_data2}
+set.seed(3223)
+inTrain <- createDataPartition(Data$classe, p = 0.7, list = FALSE)
+trainData <- Data[inTrain, ]
+testData <- Data[-inTrain,]
+
+trainColNums <- unname(colSums(is.na(trainData)))
+validateColNums <- unname(colSums(is.na(validateData)))
+
+trainNACols <- which(trainColNums != 0)
+validateNACols <- which(validateColNums != 0)
+all(trainNACols %in% validateNACols)
+```
+
+It can be seen that there are several NA columns in both training and validation data sets. **A interesting observation is that list of columns with NAs in validation data is a superset of list of columns with NAs in training data** Also, the columans with NAs have less than 1% of non NA values. It doesn't make sense to impute them in this case. So, they are discarded.
+
+A subset of columns that are fully valid in both training and validation sets are used for modeling.
+
+```{r get_data3}
+cleanTrainData <- trainData[,-c(validateNACols)]
+cleanTestData <- testData[,-c(validateNACols)]
+cleanValidateData <- validateData[,-c(validateNACols)]
+
+#Remove X, user_name, raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp, new_window, num_window
+cleanTrainData <- cleanTrainData[,-c(1,2,3,4,5,6,7)]
+cleanTestData <- cleanTestData[,-c(1,2,3,4,5,6,7)]
+cleanValidateData <- cleanValidateData[,-c(1,2,3,4,5,6,7)]
+
+#Extract Outcome
+trainOutcome <- cleanTrainData[,c('classe')]
+testOutcome <- cleanTestData[,c('classe')]
+
+#Remove outcome from training data
+cleanTrainData <- cleanTrainData[, -c(53)]
+cleanTestData <- cleanTestData[,-c(53)]
+
+#Remove problem_id from testing data
+cleanValidateData <- cleanValidateData[, -c(53)]
+```
+
+Other irrelevent variables like time stamp, subject id, window etc are also removed from consideration.
+
+#Exploratory Analysis
+
+Sigular value decomposition is performed to get an understanding of the data
+
+```{r exp1}
+svd1 <- svd(scale(cleanTrainData))
+maxcontrib1 <- which.max(svd1$v[,1])
+maxcontrib2 <- which.max(svd1$v[,2])
+
+names(cleanTrainData)[maxcontrib1]
+names(cleanTrainData)[maxcontrib2]
+
+plot(svd1$d^2/sum(svd1$d))
+
+plot <- ggplot(data = cleanTrainData, aes(x=cleanTrainData[,maxcontrib1], y=cleanTrainData[,maxcontrib2]))
+plot + geom_point(aes(col = trainOutcome)) + labs(x=names(cleanTrainData)[maxcontrib1], y=names(cleanTrainData)[maxcontrib2])
+```
+
+The top 2 contributors to this classification problem seem to be from the belt. They are accel_belt_z and accel_belt_x.
+
+From the first plot, variance is explained by a lot of variables. Looks like we need atleast 45 variables to properly explain the model.
+
+Second plot shows how the top two contributers color coded with the activity. Although they seem to create clusters of activity, just the two contributers are not sufficient to seperate them. This is in line with findings from first plot which shows just two contributers do not explain much of the variance.
+
+#Modeling and Machine Learning
+Since random forests are good at classifications, they will be used to predict validation data.
+
+```{r mac1}
+preProc1 <- preProcess(cleanTrainData, method = 'pca')
+
+set.seed(3421)
+fit1 <- train(y = trainOutcome, x = predict(preProc1, cleanTrainData), method = 'rf')
+
+validatePrediction <- predict(fit1, predict(preProc1, cleanTestData))
+
+confusionMatrix(validatePrediction, testOutcome)
+
+testPrediction <- predict(fit1, predict(preProc1, cleanValidateData))
+```
+
+Since the model provides a good accuracy, other models are not explored and this model is used to predict validation data.
