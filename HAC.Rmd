@@ -117,3 +117,5 @@ testPrediction <- predict(fit1, predict(preProc1, cleanValidateData))
 ```
 
 Since the model provides a good accuracy, other models are not explored and this model is used to predict validation data.
+
+**The expected out of sample error in validation set from cross validation is 2.4%**

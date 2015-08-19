@@ -196,6 +196,7 @@ confusionMatrix(validatePrediction, testOutcome)</code></pre>
 ## Balanced Accuracy      0.9919   0.9830   0.9793   0.9793   0.9894</code></pre>
 <pre class="r"><code>testPrediction &lt;- predict(fit1, predict(preProc1, cleanValidateData))</code></pre>
 <p>Since the model provides a good accuracy, other models are not explored and this model is used to predict validation data.</p>
+<p><strong>The expected out of sample error in validation set from cross validation is 2.4%</strong></p>
 </div>
 
 
